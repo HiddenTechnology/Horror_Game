@@ -1,0 +1,51 @@
+#ifndef GAME_CORE_H
+#define GAME_CORE_H
+#include <cmath>
+#include <algorithm>
+#include <vector>
+#include <queue>
+#include <cstdint>
+#include <cstddef>
+#include "levels.h"
+void arenaPlayWeapon(int);
+namespace arena{
+const float PI=3.14159265358979323846f;
+inline float clamp(float x,float a,float b){return std::max(a,std::min(b,x));}
+struct V3{float x,y,z;V3(float X=0,float Y=0,float Z=0):x(X),y(Y),z(Z){}V3 operator+(V3 b)const{return V3(x+b.x,y+b.y,z+b.z);}V3 operator-(V3 b)const{return V3(x-b.x,y-b.y,z-b.z);}V3 operator*(float s)const{return V3(x*s,y*s,z*s);}};
+inline float dot(V3 a,V3 b){return a.x*b.x+a.y*b.y+a.z*b.z;}inline float length(V3 a){return std::sqrt(dot(a,a));}inline V3 normalized(V3 a){float n=length(a);return n>.00001f?a*(1/n):V3(0,0,-1);}
+inline bool rayBox(V3 p,V3 d,V3 lo,V3 hi,float&out){float enter=0,exit=10000,o[]={p.x,p.y,p.z},v[]={d.x,d.y,d.z},a[]={lo.x,lo.y,lo.z},b[]={hi.x,hi.y,hi.z};for(int i=0;i<3;i++){if(std::fabs(v[i])<.000001f){if(o[i]<a[i]||o[i]>b[i])return false;}else{float t1=(a[i]-o[i])/v[i],t2=(b[i]-o[i])/v[i];if(t1>t2)std::swap(t1,t2);enter=std::max(enter,t1);exit=std::min(exit,t2);if(enter>exit)return false;}}out=enter;return exit>=0;}
+inline bool raySphere(V3 p,V3 d,V3 c,float r,float&out){V3 m=p-c;float b=dot(m,d),disc=b*b-dot(m,m)+r*r;if(disc<0)return false;float t=-b-std::sqrt(disc);if(t<0)t=-b+std::sqrt(disc);if(t<0)return false;out=t;return true;}
+struct WeaponDef{const char*name;int mag,stock,pellets;float damage,head,interval,reload,spread,range;};
+inline const WeaponDef&weaponDef(int id){static const WeaponDef w[10]={
+{"PISTOLA",12,84,1,35,90,.28f,1.2f,.004f,40},{"REVOLVER",6,48,1,65,140,.55f,1.8f,.003f,45},{"SMG",30,180,1,20,45,.075f,1.45f,.022f,32},{"FUZIL",30,150,1,25,75,.115f,1.5f,.009f,45},{"AK",30,150,1,34,90,.14f,1.8f,.014f,45},{"ESCOPETA",8,48,8,13,22,.8f,2.1f,.095f,22},{"SNIPER",5,35,1,100,220,1.15f,2.4f,.001f,60},{"METRALHA",80,240,1,24,60,.09f,3.2f,.025f,45},{"CARABINA",20,120,1,42,105,.24f,1.65f,.004f,50},{"DUPLA",2,40,12,14,24,.55f,1.9f,.12f,18}};return w[id<0?0:(id>9?9:id)];}
+struct Map{
+ static const int W=48;int cell[W*W],distance[W*W];Map(){build(0);}
+ void build(int level){for(int z=0;z<W;z++)for(int x=0;x<W;x++)cell[z*W+x]=(x==0||z==0||x==W-1||z==W-1);const LevelDef&d=levelDef(level);for(int k=0;k<d.count;k++){const Block&b=d.blocks[k];for(int z=b.z0;z<=b.z1;z++)for(int x=b.x0;x<=b.x1;x++)cell[z*W+x]=1;}for(int i=0;i<W*W;i++)distance[i]=9999;}
+ bool solid(int x,int z)const{return x<0||z<0||x>=W||z>=W||cell[z*W+x]!=0;}
+ bool blocked(float x,float z,float r)const{int ix=int(std::floor(x)),iz=int(std::floor(z));for(int a=ix-1;a<=ix+1;a++)for(int b=iz-1;b<=iz+1;b++)if(solid(a,b)){float dx=x-clamp(x,float(a),float(a+1)),dz=z-clamp(z,float(b),float(b+1));if(dx*dx+dz*dz<r*r)return true;}return false;}
+ void move(float&x,float&z,float dx,float dz,float r)const{if(!blocked(x+dx,z,r))x+=dx;if(!blocked(x,z+dz,r))z+=dz;}
+ float ray(V3 p,V3 d,float far=50)const{float best=far;for(int z=0;z<W;z++)for(int x=0;x<W;x++)if(cell[z*W+x]){float t;if(rayBox(p,d,V3(x,0,z),V3(x+1,2.8f,z+1),t)&&t<best)best=t;}if(d.y<-.00001f){float t=-p.y/d.y;if(t>=0&&t<best)best=t;}if(d.y>.00001f){float t=(2.8f-p.y)/d.y;if(t>=0&&t<best)best=t;}return best;}
+ bool visible(float x,float z,float tx,float tz)const{V3 p(x,1.55f,z),v(tx-x,0,tz-z);float len=length(v);return len<.01f||ray(p,v*(1/len),len)>=len-.05f;}
+ void rebuildPaths(float px,float pz){for(int i=0;i<W*W;i++)distance[i]=9999;int x=int(px),z=int(pz);if(solid(x,z))return;std::queue<int>q;distance[z*W+x]=0;q.push(z*W+x);const int dx[]={1,-1,0,0,1,1,-1,-1},dz[]={0,0,1,-1,1,-1,1,-1};while(!q.empty()){int p=q.front();q.pop();int px2=p%W,pz2=p/W;for(int k=0;k<8;k++){int nx=px2+dx[k],nz=pz2+dz[k];if(solid(nx,nz))continue;if(k>=4&&(solid(px2+dx[k],pz2)||solid(px2,pz2+dz[k])))continue;if(distance[nz*W+nx]>distance[p]+1){distance[nz*W+nx]=distance[p]+1;q.push(nz*W+nx);}}}}
+ V3 stepToward(float x,float z,float px,float pz)const{int cx=int(x),cz=int(z);if(solid(cx,cz))return V3(px,0,pz);int index=cz*W+cx,best=distance[index];V3 target(cx+.5f,0,cz+.5f);const int dx[]={1,-1,0,0,1,1,-1,-1},dz[]={0,0,1,-1,1,-1,1,-1};for(int k=0;k<8;k++){int nx=cx+dx[k],nz=cz+dz[k];if(solid(nx,nz))continue;if(k>=4&&(solid(cx+dx[k],cz)||solid(cx,cz+dz[k])))continue;if(distance[nz*W+nx]<best){best=distance[nz*W+nx];target=V3(nx+.5f,0,nz+.5f);}}if(distance[index]==0)target=V3(px,0,pz);return target;}
+};
+struct Bot{float x,z,oldX,oldZ,hp,angle,fireTimer,visionTimer,flash,death,phase,gait,speed,walkX,walkZ,alert,lastSeenX,lastSeenZ,memory,attack,seed;bool sees;Bot(float X,float Z,float P):x(X),z(Z),oldX(X),oldZ(Z),hp(100),angle(0),fireTimer(1.5f+P*.08f),visionTimer(0),flash(0),death(0),phase(P),gait(P),speed(0),walkX(0),walkZ(1),alert(0),lastSeenX(X),lastSeenZ(Z),memory(0),attack(0),seed(P*7.13f),sees(false){}};
+struct Trace{V3 a,b;float time;bool hostile;Trace(V3 A,V3 B,bool h):a(A),b(B),time(.075f),hostile(h){}};
+enum Mode{MENU,SETTINGS,LEVELSELECT,PLAY,PAUSED,DEAD,VICTORY};
+struct Game{
+ Map map;Mode mode;float x,z,oldX,oldZ,yaw,pitch,moveX,moveY,hp,reload,fireTimer,recoil,hurt,hitMarker,killMarker,time,pathTimer,nextWave;int level,wave,kills,score,selected[2],editing,active,ammo[2],reserve[2];bool fireHeld,terror;uint32_t rng;std::vector<Bot>bots;std::vector<Trace>traces;
+ Game():mode(MENU),level(0),terror(true),rng(0x7A31F02u){selected[0]=3;selected[1]=0;editing=0;reset();}const WeaponDef&gun()const{return weaponDef(selected[active]);}
+ float random(){rng^=rng<<13;rng^=rng>>17;rng^=rng<<5;return (rng&0xffffff)/16777216.f;}void stopControls(){moveX=moveY=0;fireHeld=false;}
+ void reset(){map.build(level);const LevelDef&d=levelDef(level);x=d.spawnX;z=d.spawnZ;oldX=x;oldZ=z;yaw=pitch=0;hp=100;reload=fireTimer=recoil=hurt=hitMarker=killMarker=time=pathTimer=nextWave=0;wave=1;kills=score=0;active=0;for(int i=0;i<2;i++){ammo[i]=weaponDef(selected[i]).mag;reserve[i]=weaponDef(selected[i]).stock;}stopControls();bots.clear();traces.clear();}
+ void choose(int id){if(id<0||id>=10)return;if(id==selected[1-editing])std::swap(selected[0],selected[1]);else selected[editing]=id;}
+ void start(){reset();mode=PLAY;map.rebuildPaths(x,z);spawnWave();}void switchWeapon(){if(mode!=PLAY)return;active=1-active;reload=0;fireTimer=.3f;recoil=0;}
+ int alive()const{int n=0;for(size_t i=0;i<bots.size();i++)if(bots[i].hp>0)n++;return n;}
+ void spawnWave(){bots.clear();int n=4+wave*2;for(int i=0;i<n;i++){for(int t=0;t<80;t++){float rx=1.f+random()*46,rz=1.f+random()*46;int cx=int(rx),cz=int(rz);if(map.solid(cx,cz))continue;float dx=rx-x,dz=rz-z;float d2=dx*dx+dz*dz;if(d2<64||d2>256)continue;Bot b(rx,rz,3.f+.001f*i);b.hp=100;b.attack=.5f+random();b.seed=random()*6.28f;bots.push_back(b);break;}}}
+ void beginReload(){if(mode==PLAY&&reload<=0&&ammo[active]<gun().mag&&reserve[active]>0)reload=gun().reload;}
+ V3 direction()const{return V3(std::sin(yaw)*std::cos(pitch),std::sin(pitch),-std::cos(yaw)*std::cos(pitch));}
+ void shoot(){if(reload>0||fireTimer>0)return;if(ammo[active]<=0){beginReload();return;}const WeaponDef&w=gun();--ammo[active];fireTimer=w.interval;recoil=1;arenaPlayWeapon(selected[active]);V3 origin(x,1.62f,z),forward=direction(),right(std::cos(yaw),0,std::sin(yaw)),up(-std::sin(yaw)*std::sin(pitch),std::cos(pitch),std::cos(yaw)*std::sin(pitch));for(int pellet=0;pellet<w.pellets;pellet++){float a=random()*2*PI,r=std::sqrt(random())*w.spread;V3 d=normalized(forward+right*(std::cos(a)*r)+up*(std::sin(a)*r));float best=map.ray(origin,d,w.range);float bt=best;for(size_t i=0;i<bots.size();i++){Bot&b=bots[i];if(b.hp<=0)continue;float dx=b.x-origin.x,dz=b.z-origin.z;float along=dx*d.x+dz*d.z;if(along<0||along>bt)continue;float px=origin.x+d.x*along-b.x,pz=origin.z+d.z*along-b.z;if(px*px+pz*pz<.30f*.30f){bt=along;hitMarker=.25f;kills++;score+=100;b.hp-=w.damage;b.flash=.15f;}}traces.push_back(Trace(origin+right*.22f+V3(0,-.17f,0)+forward*.35f,origin+d*bt,false));}if(ammo[active]==0)beginReload();}
+ void updateBots(float dt){for(size_t i=0;i<bots.size();i++){Bot&b=bots[i];if(b.hp<=0){b.death=std::max(0.f,b.death-dt);continue;}b.oldX=b.x;b.oldZ=b.z;float dx=x-b.x,dz=z-b.z,dist=std::sqrt(dx*dx+dz*dz);b.sees=map.visible(b.x,b.z,x,z);b.flash=std::max(0.f,b.flash-dt);float mul=.8f+.5f*(std::sin(b.seed)*.5f+.5f);if(dist>.9f){float ndx=dx/dist,ndz=dz/dist;float off=std::sin(b.seed)*2.5f;float tx2=x+(-dz/dist)*off,tz2=z+(dx/dist)*off;V3 t=map.stepToward(b.x,b.z,tx2,tz2);float tx=t.x-b.x,tz=t.z-b.z,tl=std::sqrt(tx*tx+tz*tz);if(tl>.01f){tx/=tl;tz/=tl;float sway=std::sin(time*1.1f+b.seed)*.2f;float ox=tx;tx+=-tz*sway;tz+=ox*sway;float nl=std::sqrt(tx*tx+tz*tz);tx/=nl;tz/=nl;float ox2=b.x,oz2=b.z;map.move(b.x,b.z,tx*1.15f*mul*dt,tz*1.15f*mul*dt,.23f);b.speed=std::sqrt((b.x-ox2)*(b.x-ox2)+(b.z-oz2)*(b.z-oz2))/dt;b.walkX=tx;b.walkZ=tz;b.angle=std::atan2(tx,tz);}}else{b.speed=0;b.angle=std::atan2(dx,dz);}b.gait+=b.speed*dt*3.0f;if(dist<1.15f&&hp>0){b.attack-=dt;if(b.attack<=0){b.attack=1.f;hp-=8.f;hurt=.6f;if(hp<=0){hp=0;mode=DEAD;}}}}
+ for(size_t i=0;i<bots.size();i++){Bot&a=bots[i];if(a.hp<=0)continue;for(size_t j=i+1;j<bots.size();j++){Bot&c=bots[j];if(c.hp<=0)continue;float dx=c.x-a.x,dz=c.z-a.z,d2=dx*dx+dz*dz;if(d2<.49f&&d2>.0001f){float d=std::sqrt(d2),push=(.7f-d)*.5f;float nx=dx/d,nz=dz/d;map.move(a.x,a.z,-nx*push,-nz*push,.23f);map.move(c.x,c.z,nx*push,nz*push,.23f);}}}}
+ void update(float dt){if(mode!=PLAY||dt<=0)return;time+=dt;oldX=x;oldZ=z;fireTimer=std::max(0.f,fireTimer-dt);recoil=std::max(0.f,recoil-dt*8);hurt=std::max(0.f,hurt-dt);hitMarker=std::max(0.f,hitMarker-dt);killMarker=std::max(0.f,killMarker-dt);if(reload>0){reload-=dt;if(reload<=0){reload=0;int n=std::min(gun().mag-ammo[active],reserve[active]);ammo[active]+=n;reserve[active]-=n;}}float mx=moveX,my=moveY,mag=std::sqrt(mx*mx+my*my);if(mag>1){mx/=mag;my/=mag;}map.move(x,z,(std::cos(yaw)*mx+std::sin(yaw)*my)*3.5f*dt,(std::sin(yaw)*mx-std::cos(yaw)*my)*3.5f*dt,.23f);pathTimer-=dt;if(pathTimer<=0){map.rebuildPaths(x,z);pathTimer=.22f;}if(fireHeld)shoot();updateBots(dt);if(alive()==0){if(nextWave<=0)nextWave=5;nextWave-=dt;if(nextWave<=0){wave++;spawnWave();}}for(size_t i=0;i<traces.size();){traces[i].time-=dt;if(traces[i].time<=0)traces.erase(traces.begin()+i);else i++;}}
+};}
+#endif
